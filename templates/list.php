@@ -4,7 +4,7 @@
 
         <div class="list-group">
             <?php foreach ($books as $key => $book): ?>
-                <a href="/catalog/<?= $book['filename'] ?>" class="list-group-item"><?= $book['name'] ?></a>
+                <a href="/intro/<?= $book['book_id'] ?>" class="list-group-item"><?= $book['name'] ?></a>
             <?php endforeach; ?>
         </div>
 

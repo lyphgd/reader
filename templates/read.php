@@ -41,25 +41,52 @@
     }
 
     p {
-        font-family: Microsoft YaHei, '宋体', Tahoma, Helvetica, Arial, "\5b8b\4f53", sans-serif;
+        text-indent: 2em;
     }
 
+    .main-body-collapse {
+        height: 200px;
+        overflow: hidden
+    }
 </style>
 <div class="container">
 
     <div class="row col-md-6 col-md-offset-3">
-        <!--<h1 id="temp"></h1>-->
         <div class="lists" id="lists">
         </div>
     </div>
 
     <div class="footer">
-        <a href="/catalog/<?= $file ?>" class="item">目录</a>
+        <a href="/intro/<?= $bookId ?>" class="item">返回书页</a>
+        <a href="/catalog/<?= $bookId ?>" class="item">返回目录</a>
+        <a href="javascript:;" class="item footer-collapse">折叠</a>
     </div>
 </div>
 
+
+<div class="modal fade" id="jumpNotice">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title">提醒</h4>
+            </div>
+            <div class="modal-body">
+                <p>检测到您已阅读到第 <?= $currLocation ?> 章，是否要前往？</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">否</button>
+                <a href="/read/<?= $bookId ?>" type="button" class="btn btn-primary">是</a>
+            </div>
+        </div>
+        <!-- /.modal-content -->
+    </div>
+    <!-- /.modal-dialog -->
+</div><!-- /.modal -->
+
 <input name="curr_location" id="curr_location" type="hidden"/>
 <input name="curr_location2" id="curr_location2" type="hidden"/>
+<input name="showJumpNotice" id="showJumpNotice" type="hidden" value="<?= $showJumpNotice ?>"/>
 
 
 <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
@@ -69,6 +96,15 @@
 <script src="/js/flowtype.js"></script>
 <script src="/js/dropload.min.js"></script>
 <SCRIPT LANGUAGE="JavaScript">
+
+    var curr_chapter = 0;
+    var counter = 0;
+    // 每页展示5个
+    var num = 5;
+    var start = <?= $start ?>;
+    var pageStart = start;
+    var wait = false;
+    var collapseFlag = false;
 
     function format() {
         String.prototype.Trim = function () {
@@ -100,12 +136,21 @@
     }
 
     $(document).ready(function () {
-        $('#curr_location').val($('#lists').height());
-        $('#curr_location').val($('.container').height());
-
+        load();
     });
 
-    var curr_chapter = <?=$start?>;
+    $('.footer-collapse').click(function () {
+        if (!collapseFlag) {
+            $('.mainBody').addClass('main-body-collapse');
+            $('.footer-collapse').html('展开');
+            collapseFlag = true;
+        } else {
+            $('.mainBody').removeClass('main-body-collapse');
+            $('.footer-collapse').html('折叠');
+            collapseFlag = false;
+        }
+
+    });
 
     $(document).scroll(function () {
         var curr_location = $(document).scrollTop();
@@ -121,10 +166,17 @@
             if (curr_location < bottom && curr_location >= $('#chapter_' + i).offset().top) {
                 if (curr_chapter != $('#chapter_' + i).attr('data-rank')) {
                     curr_chapter = $('#chapter_' + i).attr('data-rank');
-                    $.ajax({url: "/recordlocation/" + curr_chapter, async: false});
-                    //$('#curr_location').val($('.container').height());
-                    //$('#curr_location').val($('.lists').height() + '|' + $('.lists').width());
-                    //$('#curr_location').val(curr_chapter);
+                    $.ajax({
+                        url: "/recordlocation/<?=$bookId?>/" + curr_chapter,
+                        async: false,
+                        dataType: 'json',
+                        success: function (data) {
+                            // 如果检测到有当前章节有变化，则提示是否跳转
+
+                        },
+                        error: function (xhr, type) {
+                        }
+                    });
                 }
             }
 
@@ -132,67 +184,68 @@
 
     });
 
-    var counter = 0;
-    // 每页展示5个
-    var num = 5;
-    var start = <?= $start ?>;
-    var pageStart = start;
-    // dropload
-    $('.container').dropload({
-        scrollArea: window,
-        loadDownFn: function (me) {
-            $.ajax({
-                type: 'GET',
-                url: '/getmore/<?=$file?>/' + pageStart,
-                dataType: 'json',
-                success: function (data) {
-                    var result = '';
-                    counter++;
-                    pageEnd = num * counter;
-                    pageStart = pageStart + num;
-                    var index4Result = 0;
-                    for (var i = 0; i < data.lists.length; i++) {
+    $('#jumpNotice').on('hidden.bs.modal', function (e) {
+        $('#showJumpNotice').val(0);
+        load();
+    })
 
-                        result += '<h3 class="chapter" id="chapter_' + (i + pageStart - num - start) + '" data-rank="' + data.lists[i].chapterCount + '">'
-                            + data.lists[i].chapter
-                                //+ data.lists[i].chapterCount
-                            + '</h3>';
-                        for (var j = 0; j < data.lists[i].sections.length; j++) {
-                            result += '<p>' + data.lists[i].sections[j] + '</p>';
-                        }
-                        result += '</br></br>';
-
-                        if (1 != data.next) {
-                            // 锁定
-                            me.lock();
-                            // 无数据
-                            me.noData();
-                            break;
-                        }
-                    }
-                    // 为了测试，延迟1秒加载
-                    setTimeout(function () {
-                        $('.lists').append(result);
-
-                        format();
-                        // 每次数据加载完，必须重置
-                        me.resetload();
-                    }, 1000);
-                },
-                error: function (xhr, type) {
-                    alert('Ajax error!');
-                    // 即使加载出错，也得重置
-                    me.resetload();
+    function load() {
+        $('.container').dropload({
+            scrollArea: window,
+            loadDownFn: function (me) {
+                if ($('#showJumpNotice').val() == 1) {
+                    $('#jumpNotice').modal({show: true});
+                    return false;
                 }
-            });
-        }
-    });
 
-    $(function () {
-        setInterval(function () {
-            //$.ajax({url: "/recordlocation/" + $('#curr_location2').val(), async: false});
-        }, 1000);
-    });
+                $.ajax({
+                    type: 'GET',
+                    url: '/getmore/<?=$bookId?>/' + pageStart,
+                    dataType: 'json',
+                    success: function (data) {
+                        var result = '';
+                        counter++;
+                        pageEnd = num * counter;
+                        pageStart = pageStart + num;
+                        for (var i = 0; i < data.lists.length; i++) {
+
+                            result += '<div class="mainBody"><h3 class="chapter" id="chapter_' + (i + pageStart - num - start) + '" data-rank="' + data.lists[i].chapterCount + '">'
+                                + data.lists[i].chapter
+                                    //+ data.lists[i].chapterCount
+                                + '</h3>';
+                            for (var j = 0; j < data.lists[i].sections.length; j++) {
+                                result += '<p>' + data.lists[i].sections[j] + '</p>';
+                            }
+                            result += '</br></br></div>';
+
+                            if (1 != data.next) {
+                                // 锁定
+                                me.lock();
+                                // 无数据
+                                me.noData();
+                                break;
+                            }
+                        }
+                        // 为了测试，延迟1秒加载
+                        setTimeout(function () {
+                            $('.lists').append(result);
+                            format();
+
+                            // 每次数据加载完，必须重置
+                            me.resetload();
+                        }, 1000);
+                    },
+                    error: function (xhr, type) {
+                        alert('Ajax error!');
+                        // 即使加载出错，也得重置
+                        me.resetload();
+                    }
+                });
+            }
+        });
+
+    }
+
 </SCRIPT>
 </body>
 </html>

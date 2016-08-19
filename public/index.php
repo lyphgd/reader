@@ -77,6 +77,41 @@ function resolve($contents)
     return [$contents, $chapters, $body];
 }
 
+function getCollection()
+{
+    $m = new MongoClient('mongodb://localhost');
+    $db = $m->reader;
+    $collection = $db->book;
+
+    return $collection;
+}
+
+function getBookById($bookId = 0)
+{
+    $db = new \Mysqlidb(\Config_Mysql::$masterServer);
+    $db->where('id', $bookId);
+    $book = $db->getOne('books');
+
+    return $book;
+}
+
+function getCurrLocation($collection, $file_name)
+{
+    $cursor = $collection->find([
+        'filename' => $file_name,
+        'type' => 'currentLocation'
+    ]);
+    if ($cursor->count() > 0) {
+        foreach ($cursor as $key => $val) {
+            $start = $val['currentLocation'];
+        }
+    } else {
+        $start = 0;
+    }
+
+    return $start;
+}
+
 // GET route
 
 $app->get(
@@ -86,7 +121,7 @@ $app->get(
         $bookRows = $db->get('books');
         $books = array();
         foreach ($bookRows as $bookRow) {
-            $books[] = ['filename' => pathinfo($bookRow['file_name'])['filename'], 'name' => $bookRow['book_name']];
+            $books[] = ['filename' => pathinfo($bookRow['file_name'])['filename'], 'name' => $bookRow['book_name'], 'book_id' => $bookRow['id']];
         }
 
         $app->render('list.php', array('books' => $books));
@@ -94,158 +129,208 @@ $app->get(
 );
 
 $app->get(
-    '/catalog/:filename',
-    function ($filename) use ($app) {
-        $m = new MongoClient('mongodb://localhost');
-        $db = $m->reader;
-        $collection = $db->book;
+    '/intro/:bookId',
+    function ($bookId = 0) use ($app) {
+        $book = getBookById($bookId);
+        $collection = getCollection();
 
-        $catalogs = array();
-        $res = $collection->find([
-            'filename' => $filename . '.txt',
+        $currLocation = getCurrLocation($collection, $book['file_name']);
+        $catalogCount = $collection->find([
+            'filename' => $book['file_name'],
             'type' => ['$ne' => 'currentLocation']
-        ])->sort(array("chapterCount" => 1));
+        ])->count();
 
-        foreach ($res as $key => $val) {
-            $catalogs[$val['chapterCount']] = $val['chapter'];
-        }
-
-        $app->render('catalog.php', array('file' => $filename, 'catalogs' => $catalogs));
+        $app->render('intro.php', array('book' => $book, 'currLocation' => $currLocation, 'catalogCount' => $catalogCount));
     }
 );
 
 $app->get(
-    '/read/:filename(/:start)',
-    function ($filename, $start = '') use ($app) {
-        $m = new MongoClient('mongodb://localhost');
-        $db = $m->reader;
-        $collection = $db->book;
+    '/catalog/:bookId',
+    function ($bookId) use ($app) {
+        $book = getBookById($bookId);
+        if (isset($book)) {
+            $collection = getCollection();
 
-        $chapters = array();
-        $bodys = array();
-        if ($start === '') {
+            $catalogs = array();
+            $res = $collection->find([
+                'filename' => $book['file_name'],
+                'type' => ['$ne' => 'currentLocation']
+            ])->sort(array("chapterCount" => 1));
+
+            foreach ($res as $key => $val) {
+                $catalogs[$val['chapterCount']] = $val['chapter'];
+            }
+        }
+        $app->render('catalog.php', array('bookId' => $bookId, 'catalogs' => $catalogs));
+    }
+);
+
+$app->get(
+    '/read/:bookId(/:start)',
+    function ($bookId, $start = '') use ($app) {
+
+        $book = getBookById($bookId);
+        if (isset($book)) {
+            $collection = getCollection();
+
+            $chapters = array();
+            $bodys = array();
+
             $cursor = $collection->find([
-                'filename' => $filename . '.txt',
+                'filename' => $book['file_name'],
                 'type' => 'currentLocation'
             ]);
             if ($cursor->count() > 0) {
                 foreach ($cursor as $key => $val) {
-                    $start = $val['currentLocation'];
+                    $currLocation = $val['currentLocation'];
                 }
+                $showJumpNotice = 1;
             } else {
-                $start = 0;
+                $currLocation = 0;
+                $showJumpNotice = 0;
+            }
+
+            if ($start === '') {
+                $start = $currLocation;
+                $showJumpNotice = 0;
+            }
+
+            $app->render('read.php', array(
+                'body' => $bodys,
+                'chapters' => $chapters,
+                'loc' => 100,
+                'start' => $start,
+                'bookId' => $bookId,
+                'currLocation' => $currLocation,
+                'showJumpNotice' => $showJumpNotice
+            ));
+        }
+
+    }
+);
+
+$app->get(
+    '/getmore/:bookId/:start',
+    function ($bookId, $start = 0) use ($app) {
+
+        $book = getBookById($bookId);
+        if (isset($book)) {
+            $collection = getCollection();
+
+            $chapters = array();
+            $bodys = array();
+            $data = array();
+            $data['lists'] = array();
+
+
+            $cursor = $collection->find([
+                'filename' => $book['file_name'],
+                'chapterCount' => array('$gte' => $start + 0, '$lt' => $start + 5)
+            ])->sort(array("chapterCount" => 1));
+
+            foreach ($cursor as $key => $val) {
+                $chapters[$val['chapterCount']] = $val['chapter'];
+                $bodys[$val['chapterCount']] = json_decode($val['content'], true);
+
+                $item = array();
+                $item['chapterCount'] = $val['chapterCount'];
+                $item['chapter'] = $val['chapter'];
+                //$item['sections'] = '';
+                $item['sections'] = json_decode($val['content'], true);
+                $data['lists'][] = $item;
+
+            }
+
+            $data['next'] = (!isset($key) || $key < 5) ? 0 : 1;
+            echo json_encode($data);
+            exit;
+        }
+
+    }
+);
+
+$app->get(
+    '/parse/:bookId',
+    function ($bookId) use ($app) {
+        $startTime = microtime(true);
+        $book = getBookById($bookId);
+        if (isset($book)) {
+            $filename = $book['file_name'];
+            $filepath = ROOT_PATH . '/public/' . $filename;
+            if (!file_exists($filepath)) {
+                die('file not found');
+            }
+
+            $content = file_get_contents($filepath, null, null, 0, filesize($filepath));
+            $content = mb_convert_encoding($content, 'UTF-8', array('UTF-8', 'GBK', 'GB2312'));
+            $contents = explode("\n", $content);
+            list($contents, $chapters, $body) = resolve($contents);
+
+            $collection = getCollection();
+
+            foreach ($chapters as $key => $chapter) {
+                $res = $collection->find(['filename' => $filename, 'chapterCount' => $key]);
+                if ($res->count() > 0) {
+                    continue;
+                }
+                $document = array(
+                    'filename' => $filename,
+                    'chapterCount' => $key,
+                    'chapter' => $chapter,
+                    'content' => json_encode($body[$key])
+                );
+                $res = $collection->insert($document);
             }
         }
+        $consume = microtime(true) - $startTime;
 
-        $app->render('read.php', array(
-            'body' => $bodys,
-            'chapters' => $chapters,
-            'loc' => 100,
-            'start' => $start,
-            'file' => $filename
-        ));
-    }
-);
-
-$app->get(
-    '/getmore/:filename/:start',
-    function ($filename, $start = 0) use ($app) {
-
-        $m = new MongoClient('mongodb://localhost');
-        $db = $m->reader;
-        $collection = $db->book;
-
-        $filename .= '.txt';
-        $chapters = array();
-        $bodys = array();
-        $data = array();
-        $data['lists'] = array();
-
-
-        $cursor = $collection->find([
-            'filename' => $filename,
-            'chapterCount' => array('$gte' => $start + 0, '$lt' => $start + 5)
-        ])->sort(array("chapterCount" => 1));
-        foreach ($cursor as $key => $val) {
-            $chapters[$val['chapterCount']] = $val['chapter'];
-            $bodys[$val['chapterCount']] = json_decode($val['content'], true);
-
-            $item = array();
-            $item['chapterCount'] = $val['chapterCount'];
-            $item['chapter'] = $val['chapter'];
-            //$item['sections'] = '';
-            $item['sections'] = json_decode($val['content'], true);
-            $data['lists'][] = $item;
-
-        }
-
-        $data['next'] = (!isset($key) || $key < 5) ? 0 : 1;
-        echo json_encode($data);
-        exit;
-    }
-);
-
-$app->get(
-    '/resolve/:filename',
-    function ($filename) use ($app) {
-        $s = microtime(true);
-        $filename .= '.txt';
-        $filepath = ROOT_PATH . '/public/' . $filename;
-        if (!file_exists($filepath)) {
-            die('file not found');
-        }
-        $content = file_get_contents($filepath, null, null, 0, filesize($filepath));
-        $content = mb_convert_encoding($content, 'UTF-8', array('UTF-8', 'GBK', 'GB2312'));
-        $contents = explode("\n", $content);
-        list($contents, $chapters, $body) = resolve($contents);
-
-        $m = new MongoClient('mongodb://localhost');
-        $db = $m->reader;
-        $collection = $db->book;
-
-        foreach ($chapters as $key => $chapter) {
-            $res = $collection->find(['filename' => $filename, 'chapterCount' => $key]);
-            if ($res->count() > 0) {
-                continue;
-            }
-            $document = array(
-                'filename' => $filename,
-                'chapterCount' => $key,
-                'chapter' => $chapter,
-                'content' => json_encode($body[$key])
-            );
-            $res = $collection->insert($document);
-        }
-
-        var_dump(microtime(true) - $s);
+        $app->render('parse.php', array('consume' => $consume));
     }
 );
 
 
 $app->get(
-    '/recordlocation/:loc',
-    function ($loc) use ($app) {
+    '/recordlocation/:bookId/:loc',
+    function ($bookId, $loc) use ($app) {
         error_log($loc . "\r\n", 3, ROOT_PATH . '/logs/xxx.log');
-        $m = new MongoClient('mongodb://localhost');
-        $db = $m->reader;
-        $collection = $db->book;
 
-        $filename = 'yishi.txt';
-        $cursor = $collection->find([
-            'filename' => $filename,
-            'type' => 'currentLocation'
-        ]);
-
-        if ($cursor->count() > 0) {
-            $collection->update([
+        $book = getBookById($bookId);
+        if (isset($book)) {
+            $collection = getCollection();
+            $filename = $book['file_name'];
+            $res = $collection->find([
                 'filename' => $filename,
                 'type' => 'currentLocation'
-            ], ['$set' => ['currentLocation' => $loc]]);
-        } else {
-            $collection->insert(['filename' => $filename, 'type' => 'currentLocation', 'currentLocation' => $loc]);
+            ]);
+
+            if ($res->count() > 0) {
+
+                //foreach ($res as $key => $value) {
+                //    $currLocation = $value['currentLocation'];
+                //}
+                //
+                //if ($loc != $currLocation) {
+                //
+                //}
+
+                $collection->update([
+                    'filename' => $filename,
+                    'type' => 'currentLocation'
+                ], ['$set' => ['currentLocation' => $loc]]);
+            } else {
+                $collection->insert(['filename' => $filename, 'type' => 'currentLocation', 'currentLocation' => $loc]);
+            }
         }
+
     }
 );
 
+
+$app->get(
+    '/test',
+    function () use ($app) {
+        $app->render('test.php', array());
+    }
+);
 
 $app->run();
