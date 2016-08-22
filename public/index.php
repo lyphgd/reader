@@ -49,7 +49,7 @@ function resolve($contents)
         "/^前言$/",
         "/^引子$/",
         "/^第[0-9]*章.*$/",
-        "/^第(一|二|三|四|五|六|七|八|九|十|百|千)*章.*$/"
+        "/^第(一|二|三|四|五|六|七|八|九|十|百|千|零)*章.*$/"
         //"/^第.[一二三四五六七八九十]章.*$/"
     );
 
@@ -118,13 +118,34 @@ $app->get(
     '/list',
     function () use ($app) {
         $db = new \Mysqlidb(\Config_Mysql::$masterServer);
+        $collection = getCollection();
+
         $bookRows = $db->get('books');
         $books = array();
         foreach ($bookRows as $bookRow) {
-            $books[] = ['filename' => pathinfo($bookRow['file_name'])['filename'], 'name' => $bookRow['book_name'], 'book_id' => $bookRow['id']];
+            $currLocation = getCurrLocation($collection, $bookRow['file_name']);
+            $catalogCount = $collection->find([
+                'filename' => $bookRow['file_name'],
+                'type' => ['$ne' => 'currentLocation']
+            ])->count();
+            $books[] = [
+                'filename' => pathinfo($bookRow['file_name'])['filename'],
+                'name' => $bookRow['book_name'],
+                'book_id' => $bookRow['id'],
+                'currLocation' => $currLocation,
+                'catalogCount' => $catalogCount
+            ];
         }
 
         $app->render('list.php', array('books' => $books));
+    }
+);
+
+$app->get(
+    '/upload',
+    function ($bookId = 0) use ($app) {
+
+        $app->render('upload.php', array());
     }
 );
 
@@ -160,8 +181,19 @@ $app->get(
             foreach ($res as $key => $val) {
                 $catalogs[$val['chapterCount']] = $val['chapter'];
             }
+
+            $cursor = $collection->find([
+                'filename' => $book['file_name'],
+                'type' => 'currentLocation'
+            ]);
+            foreach ($cursor as $key => $val) {
+                $currLocation = $val['currentLocation'];
+            }
+
         }
-        $app->render('catalog.php', array('bookId' => $bookId, 'catalogs' => $catalogs));
+
+
+        $app->render('catalog.php', array('bookId' => $bookId, 'catalogs' => $catalogs, 'currLocation' => $currLocation));
     }
 );
 
@@ -267,6 +299,7 @@ $app->get(
             list($contents, $chapters, $body) = resolve($contents);
 
             $collection = getCollection();
+            $collection->remove(['filename' => $filename, 'type' => ['$ne' => 'currentLocation']]);
 
             foreach ($chapters as $key => $chapter) {
                 $res = $collection->find(['filename' => $filename, 'chapterCount' => $key]);
