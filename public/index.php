@@ -216,7 +216,12 @@ $app->get(
                 foreach ($cursor as $key => $val) {
                     $currLocation = $val['currentLocation'];
                 }
-                $showJumpNotice = 1;
+                if ($currLocation != $start) {
+                    $showJumpNotice = 1;
+                } else {
+                    $showJumpNotice = 0;
+                }
+
             } else {
                 $currLocation = 0;
                 $showJumpNotice = 0;
