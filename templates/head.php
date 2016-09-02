@@ -17,13 +17,15 @@
     <script src="http://cdn.bootcss.com/respond.js/1.4.2/respond.min.js"></script>
     <![endif]-->
 
+
     <link href="/css/fileinput.css" media="all" rel="stylesheet" type="text/css" />
+
 
 </head>
 <body>
 
 <style>
     .container {
-        font-family: Microsoft YaHei, '宋体', Tahoma, Helvetica, Arial, "\5b8b\4f53", sans-serif;
+        /*font-family: Microsoft YaHei, '宋体', Tahoma, Helvetica, Arial, "\5b8b\4f53", sans-serif;*/
     }
 </style>

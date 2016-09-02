@@ -1,31 +1,37 @@
 <?php require "head.php"; ?>
+
 <div class="container">
 
-    <div class="row col-md-6 col-md-offset-3">
-        <p>1</p>
-        <p>2</p>
-        <p>3</p>
-        <p>4</p>
-        <p>5</p>
-        <p>6</p>
-        <p>7</p>
-        <p>8</p>
-        <p>9</p>
+    <div class="row">
+        <!--<div class="col-md-12">-->
+        <div class="col-md-12 list-group" id="accordion">
+
+                <div class="list-group-item">
+                    123456
+
+                </div>
+                <div class="panel panel-default">
+                    <div class="panel-body">
+                        这是一个基本的面板
+                    </div>
+                </div>
+
+            <div class="list-group-item">
+                654321
+
+            </div>
+            <div class="panel panel-default">
+                <div class="panel-body">
+                    这是一个基本的面板
+                </div>
+            </div>
+            <!--</div>-->
+        </div>
     </div>
 
-    <div class="row col-md-6 col-md-offset-3">
-        <p>1</p>
-        <p>2</p>
-        <p>3</p>
-        <p>4</p>
-        <p>5</p>
-        <p>6</p>
-        <p>7</p>
-        <p>8</p>
-        <p>9</p>
-    </div>
 
 </div>
+
 
 
 <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
@@ -34,8 +40,6 @@
 <script src="/js/bootstrap.min.js"></script>
 <script src="/js/flowtype.js"></script>
 <script src="/js/dropload.min.js"></script>
-<style type="text/css">
-    .row{height:50px;overflow:hidden}
-</style>
+
 </body>
 </html>

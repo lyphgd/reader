@@ -51,16 +51,9 @@
 </style>
 <div class="container">
 
-    <div class="row col-md-6 col-md-offset-3">
-        <div class="lists" id="lists">
         </div>
     </div>
 
-    <div class="footer">
-        <a href="/intro/<?= $bookId ?>" class="item">返回书页</a>
-        <a href="/catalog/<?= $bookId ?>" class="item">返回目录</a>
-        <a href="javascript:;" class="item footer-collapse">折叠</a>
-    </div>
 </div>
 
 
@@ -117,7 +110,6 @@
             return this.replace(/(\s*$)/g, "");
         }
 
-        $('body').flowtype({
             minimum: 500,
             maximum: 1200,
             minFont: 20,
@@ -192,11 +184,6 @@
     function load() {
         $('.container').dropload({
             scrollArea: window,
-            loadDownFn: function (me) {
-                if ($('#showJumpNotice').val() == 1) {
-                    $('#jumpNotice').modal({show: true});
-                    return false;
-                }
 
                 $.ajax({
                     type: 'GET',

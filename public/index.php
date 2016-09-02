@@ -10,8 +10,8 @@ define('APPLICATION_PATH', ROOT_PATH . '/applications');
 define('TEMPLATE_PATH', ROOT_PATH . '/templates');
 define('CONFIG_PATH', ROOT_PATH . '/config');
 define('CORE_PATH', ROOT_PATH . '/core');
-
-// var_dump(ROOT_PATH);exit;
+define('FILE_PATH', ROOT_PATH . '/files');
+define('VENDOR_PATH', ROOT_PATH . '/vendor');
 
 $app = new \Slim\Slim(array(
     'templates.path' => TEMPLATE_PATH
@@ -20,6 +20,7 @@ $app = new \Slim\Slim(array(
 require CONFIG_PATH . '/config_mysql.php';
 require CORE_PATH . '/MysqliDb.php';
 
+include VENDOR_PATH . '/autoload.php';
 
 function clear_utf8_blank($data)
 {
@@ -48,8 +49,10 @@ function resolve($contents)
     $patterns = array(
         "/^前言$/",
         "/^引子$/",
+        "/^后记$/",
         "/^第[0-9]*章.*$/",
-        "/^第(一|二|三|四|五|六|七|八|九|十|百|千|零)*章.*$/"
+        "/^第(一|二|三|四|五|六|七|八|九|十|百|千|零|两| )*章.*$/",
+        "/^第(一|二|三|四|五|六|七|八|九|十|百|千|零|两| )*编.*$/"
         //"/^第.[一二三四五六七八九十]章.*$/"
     );
 
@@ -112,7 +115,51 @@ function getCurrLocation($collection, $file_name)
     return $start;
 }
 
+function path_info($filepath)
+{
+    $path_parts = array();
+    $path_parts ['dirname'] = rtrim(substr($filepath, 0, strrpos($filepath, '/')),"/")."/";
+    $path_parts ['basename'] = ltrim(substr($filepath, strrpos($filepath, '/')),"/");
+    $path_parts ['extension'] = substr(strrchr($filepath, '.'), 1);
+    $path_parts ['filename'] = ltrim(substr($path_parts ['basename'], 0, strrpos($path_parts ['basename'], '.')),"/");
+    return $path_parts;
+}
 // GET route
+
+$app->get(
+    '/index',
+    function () use ($app) {
+
+        $app->render('index.php', array());
+    }
+);
+
+$app->get(
+    '/bookrack',
+    function () use ($app) {
+        $db = new \Mysqlidb(\Config_Mysql::$masterServer);
+        $collection = getCollection();
+
+        $bookRows = $db->get('books');
+        $books = array();
+        foreach ($bookRows as $bookRow) {
+            $currLocation = getCurrLocation($collection, $bookRow['file_name']);
+            $catalogCount = $collection->find([
+                'filename' => $bookRow['file_name'],
+                'type' => ['$ne' => 'currentLocation']
+            ])->count();
+            $books[] = [
+                'filename' => pathinfo($bookRow['file_name'])['filename'],
+                'name' => $bookRow['book_name'],
+                'book_id' => $bookRow['id'],
+                'currLocation' => $currLocation,
+                'catalogCount' => $catalogCount
+            ];
+        }
+
+        $app->render('bookrack.php', array('books' => $books));
+    }
+);
 
 $app->get(
     '/list',
@@ -137,17 +184,41 @@ $app->get(
             ];
         }
 
-        $app->render('list.php', array('books' => $books));
+        $sets = $db->get('sets');
+        $app->render('list.php', array('books' => $books, 'notebooks' => $sets));
     }
 );
 
-$app->get(
+$app->map(
     '/upload',
     function ($bookId = 0) use ($app) {
+        if ($app->request->isPost()) {
+            $uploadFile = $_FILES['uploadFile'];
+            //var_dump($uploadFile);
+            //var_dump(path_info($uploadFile['name']));
+            //var_dump(pathinfo($uploadFile['name']));
+            //exit;
+            //if (pathinfo($uploadFile['name']['filename'] == '') {
+            //
+            //}
+            $uploadRes = file_put_contents(FILE_PATH . '/' . $uploadFile['name'], file_get_contents($uploadFile['tmp_name']));
+            if ($uploadRes > 0) {
+                // 上传成功，写库
+                $db = new \Mysqlidb(\Config_Mysql::$masterServer);
+                $data = [
+                    'user_id' => 0,
+                    'book_name' => path_info($uploadFile['name'])['filename'],
+                    'file_name' => $uploadFile['name'],
+                ];
+                $res = $db->insert('books', $data);
+                $app->redirect('/list');
+                exit;
+            }
+        }
 
         $app->render('upload.php', array());
     }
-);
+)->via('GET', 'POST');
 
 $app->get(
     '/intro/:bookId',
@@ -162,6 +233,28 @@ $app->get(
         ])->count();
 
         $app->render('intro.php', array('book' => $book, 'currLocation' => $currLocation, 'catalogCount' => $catalogCount));
+    }
+);
+
+$app->get(
+    '/delete/:bookId',
+    function ($bookId = 0) use ($app) {
+        $book = getBookById($bookId);
+
+        $collection = getCollection();
+
+        $catalogCount = $collection->remove([
+            'filename' => $book['file_name']
+        ]);
+
+        unlink(FILE_PATH . '/' . $book['file_name']);
+
+        $db = new \Mysqlidb(\Config_Mysql::$masterServer);
+        $db->where('id', $bookId);
+        $db->delete('books', 1);
+
+        $app->redirect('/list');
+        exit;
     }
 );
 
@@ -186,9 +279,14 @@ $app->get(
                 'filename' => $book['file_name'],
                 'type' => 'currentLocation'
             ]);
-            foreach ($cursor as $key => $val) {
-                $currLocation = $val['currentLocation'];
+            if ($cursor->count() > 0) {
+                foreach ($cursor as $key => $val) {
+                    $currLocation = $val['currentLocation'];
+                }
+            } else {
+                $currLocation = 0;
             }
+
 
         }
 
@@ -212,9 +310,19 @@ $app->get(
                 'filename' => $book['file_name'],
                 'type' => 'currentLocation'
             ]);
+            $chapter = '';
             if ($cursor->count() > 0) {
                 foreach ($cursor as $key => $val) {
                     $currLocation = $val['currentLocation'];
+                }
+                $cursor = $collection->find([
+                    'filename' => $book['file_name'],
+                    'chapterCount' => intval($currLocation)
+                ]);
+                if ($cursor->count() > 0) {
+                    foreach ($cursor as $key => $val) {
+                        $chapter = $val['chapter'];
+                    }
                 }
                 if ($currLocation != $start) {
                     $showJumpNotice = 1;
@@ -239,7 +347,8 @@ $app->get(
                 'start' => $start,
                 'bookId' => $bookId,
                 'currLocation' => $currLocation,
-                'showJumpNotice' => $showJumpNotice
+                'showJumpNotice' => $showJumpNotice,
+                'chapter' => $chapter
             ));
         }
 
@@ -259,7 +368,6 @@ $app->get(
             $data = array();
             $data['lists'] = array();
 
-
             $cursor = $collection->find([
                 'filename' => $book['file_name'],
                 'chapterCount' => array('$gte' => $start + 0, '$lt' => $start + 5)
@@ -272,7 +380,6 @@ $app->get(
                 $item = array();
                 $item['chapterCount'] = $val['chapterCount'];
                 $item['chapter'] = $val['chapter'];
-                //$item['sections'] = '';
                 $item['sections'] = json_decode($val['content'], true);
                 $data['lists'][] = $item;
 
@@ -293,31 +400,48 @@ $app->get(
         $book = getBookById($bookId);
         if (isset($book)) {
             $filename = $book['file_name'];
-            $filepath = ROOT_PATH . '/public/' . $filename;
+            $filepath = FILE_PATH . '/' . $filename;
             if (!file_exists($filepath)) {
                 die('file not found');
             }
 
-            $content = file_get_contents($filepath, null, null, 0, filesize($filepath));
-            $content = mb_convert_encoding($content, 'UTF-8', array('UTF-8', 'GBK', 'GB2312'));
-            $contents = explode("\n", $content);
-            list($contents, $chapters, $body) = resolve($contents);
+            if (pathinfo($filename)['extension'] == 'pdf') {
+                $content = file_get_contents($filepath, null, null, 0, filesize($filepath));
 
-            $collection = getCollection();
-            $collection->remove(['filename' => $filename, 'type' => ['$ne' => 'currentLocation']]);
+                $parser = new Smalot\PdfParser\Parser();
+                try {
+                    $pdf = $parser->parseFile($filepath);
+                    $pages = $pdf->getPages();
 
-            foreach ($chapters as $key => $chapter) {
-                $res = $collection->find(['filename' => $filename, 'chapterCount' => $key]);
-                if ($res->count() > 0) {
-                    continue;
+                    foreach ($pages as $page) {
+                        var_dump($page->getText());
+                    }
+
+                } catch (\Exception $e) {
+                    var_dump($e);
                 }
-                $document = array(
-                    'filename' => $filename,
-                    'chapterCount' => $key,
-                    'chapter' => $chapter,
-                    'content' => json_encode($body[$key])
-                );
-                $res = $collection->insert($document);
+            } else if (pathinfo($filename)['extension'] == 'txt') {
+                $content = file_get_contents($filepath, null, null, 0, filesize($filepath));
+                $content = mb_convert_encoding($content, 'UTF-8', array('UTF-8', 'GBK', 'GB2312'));
+                $contents = explode("\n", $content);
+                list($contents, $chapters, $body) = resolve($contents);
+
+                $collection = getCollection();
+                $collection->remove(['filename' => $filename, 'type' => ['$ne' => 'currentLocation']]);
+
+                foreach ($chapters as $key => $chapter) {
+                    $res = $collection->find(['filename' => $filename, 'chapterCount' => $key]);
+                    if ($res->count() > 0) {
+                        continue;
+                    }
+                    $document = array(
+                        'filename' => $filename,
+                        'chapterCount' => $key,
+                        'chapter' => $chapter,
+                        'content' => json_encode($body[$key])
+                    );
+                    $res = $collection->insert($document);
+                }
             }
         }
         $consume = microtime(true) - $startTime;
@@ -363,6 +487,40 @@ $app->get(
     }
 );
 
+$app->map(
+    '/notebook/add',
+    function () use ($app) {
+        if ($app->request->isPost()) {
+            $db = new \Mysqlidb(\Config_Mysql::$masterServer);
+            $data = [
+                'set_name' => $app->request->post('notebook_name'),
+                'user_id' => 0
+            ];
+            $db->insert('sets', $data);
+            var_dump($db->getLastError());
+        }
+
+        $app->render('notebook_add.php', array());
+    }
+)->via('GET', 'POST');
+
+$app->map(
+    '/note/add/:notebookId',
+    function ($notebookId = 0) use ($app) {
+        if ($app->request->isPost()) {
+            $db = new \Mysqlidb(\Config_Mysql::$masterServer);
+            $data = [
+                'cell_name' => $app->request->post('note_title'),
+                'set_id' => $notebookId,
+                'user_id' => 0
+            ];
+            $db->insert('cells', $data);
+            var_dump($db->getLastError());
+        }
+
+        $app->render('note_add.php', array());
+    }
+)->via('GET', 'POST');
 
 $app->get(
     '/test',
